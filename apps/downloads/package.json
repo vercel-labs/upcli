@@ -1,0 +1,10 @@
+{
+  "name": "upcli-downloads",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.23.0",
+  "scripts": {
+    "build": "node scripts/verify-releases.mjs"
+  }
+}

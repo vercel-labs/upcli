@@ -1,0 +1,308 @@
+// In-VM supervisor. Serves a boot page until the target is reachable and the
+// CLI releases it after reconciliation, then proxies HTTP and WebSocket traffic.
+// Node builtins only; ports and the status-file path come from env.
+"use strict";
+const http = require("http");
+const net = require("net");
+const fs = require("fs");
+
+const PUBLIC_PORT = parseInt(process.env.DEV_PUBLIC_PORT || "3000", 10);
+const TARGET_PORT = parseInt(process.env.DEV_TARGET_PORT || "3001", 10);
+const TARGET_HOST = "127.0.0.1";
+const STATUS_FILE = process.env.DEV_STATUS_FILE || "/tmp/dev-status.json";
+const RUN_ID = process.env.DEV_RUN_ID || "";
+const MAX_STATUS_CLIENTS = parseInt(process.env.DEV_MAX_STATUS_CLIENTS || "64", 10);
+
+let ready = false;
+let targetOpen = false;
+// Open SSE connections; we push a status snapshot to each on every change.
+const clients = new Set();
+
+// Proxy only after both the target is open and the CLI has completed reconciliation.
+function currentStatus() {
+  let data = { label: "preparing sandbox", base: 0, ceiling: 10, etaMs: 4000 };
+  try {
+    data = JSON.parse(fs.readFileSync(STATUS_FILE, "utf8"));
+  } catch (e) {
+    // No snapshot yet (supervisor up before the CLI's first write); use default.
+  }
+  if (data.ready === true && targetOpen) ready = true;
+  data.ready = ready;
+  data.runId = RUN_ID;
+  return data;
+}
+
+// Push the current status to every connected boot page (Server-Sent Events).
+function broadcast() {
+  const status = currentStatus();
+  const frame = "data: " + JSON.stringify(status) + "\n\n";
+  for (const res of clients) {
+    try {
+      res.write(frame);
+      if (status.ready) {
+        res.end();
+        clients.delete(res);
+      }
+    } catch (e) {
+      clients.delete(res);
+    }
+  }
+}
+
+// Probe target availability while the CLI completes its startup work.
+function probe() {
+  const sock = net.connect(TARGET_PORT, TARGET_HOST);
+  sock.setTimeout(800);
+  sock.on("connect", function () {
+    targetOpen = true;
+    sock.destroy();
+    broadcast();
+    if (!ready) setTimeout(probe, 300);
+  });
+  const retry = function () {
+    targetOpen = false;
+    sock.destroy();
+    if (!ready) setTimeout(probe, 300);
+  };
+  sock.on("error", retry);
+  sock.on("timeout", retry);
+}
+probe();
+
+// Phase changes arrive as STATUS_FILE rewrites; watch it and push on change.
+// (watchFile polls the local file server-side; the browser still gets a push.)
+try {
+  fs.watchFile(STATUS_FILE, { interval: 250 }, broadcast);
+} catch (e) {
+  // If watching is unavailable, the SSE client still gets the initial frame.
+}
+
+// Plain JSON snapshot, handy for curl/debugging.
+function serveStatus(res) {
+  res.writeHead(200, {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+  });
+  res.end(JSON.stringify(currentStatus()));
+}
+
+// SSE stream: the current status now, then a push on every change until ready.
+function serveEvents(req, res) {
+  if (clients.size >= MAX_STATUS_CLIENTS) {
+    res.writeHead(503, {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "no-store",
+      "retry-after": "1",
+    });
+    res.end("up: too many status streams");
+    return;
+  }
+  const status = currentStatus();
+  res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-store",
+    connection: "keep-alive",
+    "x-content-type-options": "nosniff",
+    "x-accel-buffering": "no", // ask any intermediary not to buffer the stream
+  });
+  res.write("retry: 1000\n\n");
+  res.write("data: " + JSON.stringify(status) + "\n\n");
+  if (status.ready) {
+    res.end();
+    return;
+  }
+  clients.add(res);
+  req.on("close", function () {
+    clients.delete(res);
+  });
+}
+
+const BOOT_PAGE = `<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>starting</title>
+<style>
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{display:grid;place-items:center;background:#000;color:#fff;font-family:'Geist Mono',ui-monospace,monospace;-webkit-font-smoothing:antialiased}
+.wrap{display:inline-flex;flex-direction:column;align-items:stretch;gap:12px;padding:24px}
+.msg{font-size:20px;letter-spacing:.07em;color:#c8c8c8;white-space:nowrap}
+.bar{display:flex;gap:2px}
+.cell{flex:1;height:6px;background:rgba(237,237,237,.08);transition:background .12s linear}
+.cell.lead{animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(237,237,237,0)}50%{box-shadow:0 0 5px 1px rgba(237,237,237,.45)}}
+.cap{display:flex;justify-content:space-between;font-family:'Geist Mono',ui-monospace,monospace;font-size:10px;letter-spacing:.03em;color:#444}
+.foot{position:fixed;bottom:26px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:12px;font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.1em;color:#5a5a5a}
+.foot a,.foot button{color:#5a5a5a;text-decoration:none;background:none;border:0;margin:0;padding:0;font:inherit;letter-spacing:inherit;cursor:pointer}
+.foot a:hover,.foot button:hover{color:#aaa}
+.foot .sep{color:#2c2c2c}
+.how{position:fixed;left:0;right:0;bottom:62px;display:flex;justify-content:center;padding:0 24px;pointer-events:none}
+.how-inner{margin:0;max-width:460px;font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;line-height:1.75;letter-spacing:.01em;color:#7a7a7a;text-align:center;opacity:0;transform:translateY(6px);transition:opacity .25s ease,transform .25s ease}
+.how-inner.open{opacity:1;transform:none}
+</style></head>
+<body>
+<div class="wrap">
+  <div class="msg">starting your up environment</div>
+  <div class="bar" id="b"></div>
+  <div class="cap"><span id="l">preparing sandbox</span><span id="p">0%</span></div>
+</div>
+<div class="how"><p class="how-inner" id="how">up syncs your working directory into a Vercel Sandbox, installs dependencies, and runs your dev server in the cloud, serving it back at this URL. While it boots, a tiny supervisor inside the sandbox shows this page, then hands off to your app the moment it is ready, proxying HTTP and WebSocket traffic to your dev server. Edit locally and changes sync up.</p></div>
+<div class="foot">
+  <a href="https://vercel.com/sandbox" target="_blank" rel="noopener">Powered by Vercel Sandbox</a>
+  <span class="sep">·</span>
+  <button type="button" id="howBtn">how it works</button>
+  <span class="sep">·</span>
+  <a href="https://github.com/vercel-labs" target="_blank" rel="noopener">by Vercel Labs</a>
+</div>
+<script>
+(function(){
+  var bar=document.getElementById("b"),lab=document.getElementById("l"),pct=document.getElementById("p");
+  var N=36,cells=[];
+  for(var i=0;i<N;i++){var c=document.createElement("div");c.className="cell";bar.appendChild(c);cells.push(c);}
+  var seg={base:0,ceiling:10,eta:4000,label:"preparing sandbox"};
+  var segStart=performance.now(),shown=0,target=0,lead=-1,done=false,reloaded=false;
+  // Light cells up to the (fractional) progress; the edge cell fades in smoothly
+  // and pulses, so motion reads as a continuous trickle rather than big jumps.
+  function draw(v){
+    var fc=v/100*N,full=Math.floor(fc);
+    var nlead=(full<N&&fc-full>0.001)?full:-1;
+    for(var i=0;i<N;i++){
+      var o=fc-i;if(o<0)o=0;if(o>1)o=1;
+      cells[i].style.background="rgba(237,237,237,"+(0.10+0.90*o)+")";
+    }
+    if(nlead!==lead){
+      if(lead>=0&&cells[lead])cells[lead].classList.remove("lead");
+      if(nlead>=0)cells[nlead].classList.add("lead");
+      lead=nlead;
+    }
+  }
+  function frame(){
+    if(done){target=100;}
+    else{
+      var t=performance.now()-segStart;
+      var frac=1-Math.exp(-t/Math.max(400,seg.eta));
+      target=seg.base+(seg.ceiling-seg.base)*frac;
+    }
+    if(target>shown)shown+=(target-shown)*(done?0.16:0.07);
+    if(target-shown<0.04)shown=target;
+    var v=Math.min(100,shown);
+    draw(v);
+    pct.textContent=Math.floor(v)+"%";
+    lab.textContent=done?"ready":seg.label;
+    if(done&&v>=99.6){if(!reloaded){reloaded=true;setTimeout(function(){location.reload();},320);}return;}
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  // The supervisor pushes phase changes and the ready signal over SSE; the bar
+  // just reacts. EventSource reconnects on its own if the stream drops.
+  var es=new EventSource("/__dev/events");
+  es.onmessage=function(ev){
+    var s=JSON.parse(ev.data);
+    if(s.ready){done=true;es.close();return;}
+    if(s.label&&s.label!==seg.label){
+      seg={base:s.base,ceiling:s.ceiling,eta:s.etaMs,label:s.label};
+      segStart=performance.now();
+    }else if(s.ceiling!=null){
+      seg.ceiling=s.ceiling;seg.eta=s.etaMs;
+    }
+  };
+  // "how it works" footer item toggles a short explainer above the footer.
+  var howBtn=document.getElementById("howBtn"),how=document.getElementById("how");
+  if(howBtn&&how)howBtn.addEventListener("click",function(){how.classList.toggle("open");});
+})();
+</script>
+</body></html>`;
+
+function serveBootPage(res) {
+  res.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "content-security-policy":
+      "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+  });
+  res.end(BOOT_PAGE);
+}
+
+const server = http.createServer(function (req, res) {
+  if (req.url === "/__dev/events") {
+    serveEvents(req, res);
+    return;
+  }
+  if (req.url === "/__dev/status") {
+    serveStatus(res);
+    return;
+  }
+  if (!ready) {
+    serveBootPage(res);
+    return;
+  }
+  const upstream = http.request(
+    {
+      host: TARGET_HOST,
+      port: TARGET_PORT,
+      method: req.method,
+      path: req.url,
+      headers: req.headers, // preserve Host (same-origin); dev server expects it
+    },
+    function (up) {
+      res.writeHead(up.statusCode || 502, up.headers);
+      up.pipe(res);
+    },
+  );
+  upstream.on("error", function () {
+    if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain" });
+    res.end("up: upstream not reachable");
+  });
+  req.pipe(upstream);
+});
+
+// WebSocket / Upgrade passthrough: hijack the raw socket and pipe bidirectionally.
+// Bound concurrent tunnels and reap idle/dead ones so a client holding the public
+// URL cannot exhaust the supervisor's file descriptors with sockets that never error.
+const MAX_UPGRADES = parseInt(process.env.DEV_MAX_UPGRADES || "256", 10);
+const UPGRADE_IDLE_MS = parseInt(process.env.DEV_UPGRADE_IDLE_MS || "600000", 10);
+let activeUpgrades = 0;
+server.on("upgrade", function (req, socket, head) {
+  if (!ready || activeUpgrades >= MAX_UPGRADES) {
+    socket.destroy();
+    return;
+  }
+  activeUpgrades++;
+  const upstream = net.connect(TARGET_PORT, TARGET_HOST, function () {
+    const lines = [req.method + " " + req.url + " HTTP/1.1"];
+    for (let i = 0; i < req.rawHeaders.length; i += 2) {
+      lines.push(req.rawHeaders[i] + ": " + req.rawHeaders[i + 1]);
+    }
+    upstream.write(lines.join("\r\n") + "\r\n\r\n");
+    if (head && head.length) upstream.write(head);
+    upstream.pipe(socket);
+    socket.pipe(upstream);
+  });
+  // Tear both ends down exactly once and release the slot, whether the end comes
+  // from an error, a normal close, or the idle-timeout reaper.
+  let settled = false;
+  const teardown = function () {
+    if (settled) return;
+    settled = true;
+    activeUpgrades--;
+    socket.destroy();
+    upstream.destroy();
+  };
+  if (UPGRADE_IDLE_MS > 0) {
+    socket.setTimeout(UPGRADE_IDLE_MS, teardown);
+    upstream.setTimeout(UPGRADE_IDLE_MS, teardown);
+  }
+  socket.on("error", teardown);
+  socket.on("close", teardown);
+  upstream.on("error", teardown);
+  upstream.on("close", teardown);
+});
+
+// Slowloris guards on the plain-HTTP proxy path (the upgrade path is bounded above).
+server.requestTimeout = parseInt(process.env.DEV_REQUEST_TIMEOUT_MS || "300000", 10);
+server.headersTimeout = parseInt(process.env.DEV_HEADERS_TIMEOUT_MS || "60000", 10);
+
+server.listen(PUBLIC_PORT, "0.0.0.0", function () {
+  console.log("[up supervisor] :" + PUBLIC_PORT + " -> :" + TARGET_PORT);
+});

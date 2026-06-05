@@ -1,0 +1,4 @@
+# Isolates this Next.js app from the monorepo pnpm workspace at the repo root.
+# The landing site is its own Vercel project (root directory: landing) and is
+# intentionally kept out of `pnpm -r`, so CLI releases never build the site.
+packages: []

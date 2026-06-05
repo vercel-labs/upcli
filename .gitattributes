@@ -1,0 +1,3 @@
+# The published CLI bundle is a generated, minified artifact: keep it out of
+# GitHub language stats and collapse it in diffs.
+apps/downloads/public/releases/** linguist-generated=true

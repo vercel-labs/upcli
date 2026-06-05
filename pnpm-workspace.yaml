@@ -1,0 +1,11 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+# Delay adopting newly published dependency versions by two days, so a compromised
+# release has a window to be flagged before a lockfile update can pull it in.
+minimumReleaseAge: 2880
+# These verified releases are pinned now and exempt from the age gate above.
+minimumReleaseAgeExclude:
+  - "@vercel/fs-detectors"
+  - "@vercel/build-utils"

@@ -1,0 +1,95 @@
+name: CI
+
+# Validates every PR and blocks edits to already-published release artifacts.
+# PR-only: a PR is validated before merge, so a main run would just duplicate it.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.23.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.x
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Builds the CLI and the downloads app (which re-hashes every committed release bundle).
+      - name: Validate and build
+        run: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+          pnpm build
+
+  landing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.23.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.x
+          cache: pnpm
+          cache-dependency-path: landing/pnpm-lock.yaml
+
+      # The landing site is a self-contained workspace with its own lockfile.
+      - name: Build landing site
+        working-directory: landing
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+  release-artifacts-immutable:
+    # Published bundles under public/releases are immutable and content-addressed by
+    # version. A new release ADDS a version directory; it must never MODIFY, DELETE,
+    # or RENAME an existing one. This makes a backdoored-blob swap of an already
+    # shipped version fail CI loudly instead of riding in on an unreadable minified diff.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Forbid changes to already-published release artifacts
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Status of release files changed by this PR (M=modified, D=deleted,
+          # R=renamed, A=added). Only A is allowed.
+          violations="$(git diff --name-status "$BASE_SHA...$HEAD_SHA" -- \
+            'apps/downloads/public/releases/**' | awk 'NF && $1 !~ /^A/ { print }')"
+          if [ -n "$violations" ]; then
+            echo "::error::Published release artifacts are immutable. Add a new version directory; do not modify, delete, or rename an existing one."
+            printf '%s\n' "$violations"
+            exit 1
+          fi
+          echo "OK: no existing release artifacts were modified."

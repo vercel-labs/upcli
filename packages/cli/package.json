@@ -1,0 +1,48 @@
+{
+  "name": "@vercel-labs/up",
+  "version": "0.1.0",
+  "description": "Instant, shareable dev environments on Vercel Sandbox",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vercel-labs/upcli.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://upcli.dev",
+  "keywords": [
+    "vercel",
+    "sandbox",
+    "development",
+    "dev-server"
+  ],
+  "type": "module",
+  "bin": {
+    "up": "./dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "private": true,
+  "scripts": {
+    "build": "tsup && node scripts/check-bundle-size.mjs",
+    "dev": "tsup --watch",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "@clack/prompts": "^1.4.0",
+    "@types/node": "^25.9.1",
+    "@vercel/frameworks": "^3.26.1",
+    "@vercel/fs-detectors": "6.7.4",
+    "@vercel/sandbox": "^2.0.1",
+    "citty": "^0.2.2",
+    "env-paths": "^4.0.0",
+    "esbuild": "^0.27.7",
+    "ignore": "^7.0.5",
+    "picocolors": "^1.1.1",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}

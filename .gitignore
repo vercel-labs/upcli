@@ -1,0 +1,20 @@
+node_modules
+dist
+*.log
+.DS_Store
+.env*
+!.env.example
+.turbo
+coverage
+*.tsbuildinfo
+.vercel
+
+# Local workspace deploy notes (contain internal org/project ids and scope)
+/AGENTS.md
+/STATUS.md
+
+# Internal security-audit tooling workspace
+/.deepsec/
+
+# Local Claude Code state (workflow scripts, transcripts, settings)
+.claude/
