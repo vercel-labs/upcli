@@ -122,29 +122,29 @@ button:focus-visible {
 
 .hero-note {
   position: absolute;
-  bottom: clamp(24px, 4vw, 48px);
+  bottom: clamp(16px, 3vw, 48px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  align-items: baseline;
-  gap: 12px;
-  width: fit-content;
-  max-width: calc(100% - 2 * var(--px));
-  padding: 14px 18px;
+  align-items: flex-start;
+  gap: 8px;
+  width: calc(100% - 2 * var(--px));
+  max-width: 42rem;
+  padding: 10px 12px;
   border: 1px solid var(--border);
   background: oklch(0.08 0 0);
   font-family: var(--mono);
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: 11px;
+  line-height: 1.5;
   color: var(--muted-fg);
 }
 
 .hero-note .tag {
   flex: none;
-  padding: 2px 8px;
+  padding: 2px 6px;
   border: 1px solid var(--border);
-  font-size: 11px;
-  letter-spacing: 0.12em;
+  font-size: 10px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--fg);
 }
@@ -154,6 +154,23 @@ button:focus-visible {
     flex-direction: row;
     align-items: center;
     gap: 40px;
+  }
+
+  .hero-note {
+    bottom: clamp(24px, 4vw, 48px);
+    gap: 12px;
+    width: fit-content;
+    max-width: calc(100% - 2 * var(--px));
+    padding: 14px 18px;
+    align-items: baseline;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .hero-note .tag {
+    padding: 2px 8px;
+    font-size: 11px;
+    letter-spacing: 0.12em;
   }
 }
 
