@@ -52,6 +52,7 @@ async function runProvisionScript(
         while (recent.length > 40) recent.shift();
       },
       signal,
+      retryTransport: true,
     }),
   );
   if (exitCode !== 0) {

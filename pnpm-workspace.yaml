@@ -9,3 +9,6 @@ minimumReleaseAge: 2880
 minimumReleaseAgeExclude:
   - "@vercel/fs-detectors"
   - "@vercel/build-utils"
+  - "@vercel/sandbox"
+  # Required floor (^7.27.1) of @vercel/sandbox; undici is Node's HTTP client.
+  - "undici"

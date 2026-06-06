@@ -2,7 +2,7 @@ import { Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Sandbox } from "@vercel/sandbox";
 import type { Credentials } from "./auth.js";
-import { withRetry } from "./retry.js";
+import { isRetryableTransport, withRetry } from "./retry.js";
 
 export interface DevFile {
   /** Path relative to the project root inside the sandbox, or absolute. */
@@ -18,6 +18,12 @@ export interface ExecOptions {
   /** Called with each chunk of combined stdout/stderr output. */
   onLog?: (chunk: string) => void;
   signal?: AbortSignal;
+  /**
+   * Retry transport-level failures (mangled/dropped responses from a proxy or
+   * gateway). Only set this for commands that are safe to run more than once,
+   * since a retry re-executes the command. Defaults to no retry.
+   */
+  retryTransport?: boolean;
 }
 
 export interface ExecResult {
@@ -93,16 +99,23 @@ class VercelDevSandbox implements DevSandbox {
 
   async exec(cmd: string, args: string[], opts: ExecOptions = {}): Promise<ExecResult> {
     const stream = opts.onLog ? writableForLog(opts.onLog) : undefined;
-    const finished = await this.sandbox.runCommand({
-      cmd,
-      args,
-      cwd: opts.cwd,
-      env: opts.env,
-      sudo: opts.sudo,
-      signal: opts.signal,
-      stdout: stream,
-      stderr: stream,
-    });
+    const run = () =>
+      this.sandbox.runCommand({
+        cmd,
+        args,
+        cwd: opts.cwd,
+        env: opts.env,
+        sudo: opts.sudo,
+        signal: opts.signal,
+        stdout: stream,
+        stderr: stream,
+      });
+    // Retrying re-executes the command, so it is opt-in (only callers that pass
+    // an idempotent command set retryTransport). A real non-zero exit is returned
+    // as a result, not thrown, so it is never treated as a transport failure.
+    const finished = opts.retryTransport
+      ? await withRetry(run, { shouldRetry: isRetryableTransport })
+      : await run();
     return { exitCode: finished.exitCode };
   }
 
@@ -143,16 +156,25 @@ class VercelDevSandbox implements DevSandbox {
     const wasStopped = this.sandbox.status === "stopped";
     const isNewSnapshot = (snapshotId: string | undefined): snapshotId is string =>
       Boolean(snapshotId && (!beforeSnapshotId || snapshotId !== beforeSnapshotId));
-    const stopped = await this.sandbox.stop();
-    const snapshotId = stopped.snapshot?.id;
+    // A transport hiccup can mangle the stop response even though the stop was
+    // dispatched. Rather than blindly re-issuing stop (which risks a confusing
+    // double-stop), swallow a transport error and let the polling below confirm
+    // the result via Sandbox.get; any other error is a real failure and rethrows.
+    let stopped: Awaited<ReturnType<Sandbox["stop"]>> | undefined;
+    try {
+      stopped = await this.sandbox.stop();
+    } catch (err) {
+      if (!isRetryableTransport(err)) throw err;
+    }
+    const snapshotId = stopped?.snapshot?.id;
     if (snapshotId && (wasStopped || isNewSnapshot(snapshotId))) {
-      return { status: stopped.status, snapshotId };
+      return { status: stopped?.status, snapshotId };
     }
 
     // A stopped session can expose its snapshot pointer shortly after stop resolves.
     const deadline = Date.now() + 60_000;
     let last: { status?: string; snapshotId?: string } = {
-      status: stopped.status,
+      status: stopped?.status,
       snapshotId: this.sandbox.currentSnapshotId,
     };
     while (Date.now() < deadline) {

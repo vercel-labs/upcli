@@ -447,7 +447,7 @@ export async function removeFiles(sandbox: DevSandbox, relPaths: string[]): Prom
   const targets = relPaths.map((rel) =>
     path.posix.join(REMOTE_ROOT, validateRelativeSyncPath(rel)),
   );
-  await sandbox.exec("rm", ["-f", ...targets]);
+  await sandbox.exec("rm", ["-f", ...targets], { retryTransport: true });
 }
 
 export interface ReconcileResult {
