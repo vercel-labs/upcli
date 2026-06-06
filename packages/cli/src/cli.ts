@@ -25,6 +25,7 @@ import { type EnvFile, findDefaultEnvFile, readEnvFile } from "./env.js";
 import { type PromptDraft, resolveLaunchProfile } from "./launch-profile.js";
 import { SandboxLifecycle } from "./lifecycle.js";
 import { waitForPort, waitForSupervisor } from "./ready.js";
+import { isRetryableTransport } from "./retry.js";
 import type { DevSandbox } from "./sandbox.js";
 import { DEFAULT_TIMEOUT_MS, VercelProvider } from "./sandbox.js";
 import { installEtaFromDeps, startEtaFor, writeStatus } from "./status.js";
@@ -84,7 +85,7 @@ async function remoteTextEquals(
   const { exitCode } = await sandbox.exec(
     "bash",
     ["-c", 'test -f "$1" && test "$(cat "$1")" = "$2"', "dev", absPath, expected],
-    { signal },
+    { signal, retryTransport: true },
   );
   return exitCode === 0;
 }
@@ -526,7 +527,10 @@ async function runDev(
       );
       await resources.run((signal) =>
         sandbox
-          .exec("bash", ["-c", "pkill -f dev-supervisor.cjs >/dev/null 2>&1 || true"], { signal })
+          .exec("bash", ["-c", "pkill -f dev-supervisor.cjs >/dev/null 2>&1 || true"], {
+            signal,
+            retryTransport: true,
+          })
           .catch(() => ({ exitCode: 0 })),
       );
       const supervisorProc = await resources.run((signal) =>
@@ -730,6 +734,7 @@ async function runDev(
           env: { PORT: String(devPort) },
           onLog: (chunk) => recent.push(chunk),
           signal,
+          retryTransport: true,
         }),
       );
       if (exitCode !== 0) {
@@ -993,7 +998,16 @@ async function runDev(
         );
       }
     } catch (stopErr) {
-      await ui.warn(`Could not save snapshot after startup failure: ${formatError(stopErr)}`);
+      // A transport-level snapshot failure usually shares the root cause reported
+      // below, so keep it a dim aside rather than a second alarming error. A
+      // genuinely different failure still surfaces loudly.
+      if (isRetryableTransport(stopErr)) {
+        await ui.info(
+          pc.dim("Could not save a snapshot of the failed sandbox; run `up .` to retry."),
+        );
+      } else {
+        await ui.warn(`Could not save snapshot after startup failure: ${formatError(stopErr)}`);
+      }
     }
     return fail(err);
   }
@@ -1063,7 +1077,27 @@ function ring(max: number) {
 }
 
 function formatError(err: unknown): string {
-  return sanitizeTerminalText(err instanceof Error ? err.message : String(err));
+  const base = sanitizeTerminalText(err instanceof Error ? err.message : String(err));
+  // The Sandbox SDK's APIError carries the HTTP response and raw body, which the
+  // message alone hides. Surface the status, an unexpected content-type, and a
+  // body snippet so transport failures (proxies, gateways, rate limits) are
+  // diagnosable instead of opaque ("Expected a stream of command data").
+  if (err && typeof err === "object") {
+    const e = err as {
+      response?: { status?: number; headers?: { get?: (name: string) => string | null } };
+      text?: unknown;
+    };
+    const detail: string[] = [];
+    if (typeof e.response?.status === "number") detail.push(`HTTP ${e.response.status}`);
+    const contentType = e.response?.headers?.get?.("content-type");
+    if (contentType && !/json/i.test(contentType)) detail.push(`content-type ${contentType}`);
+    if (typeof e.text === "string" && e.text.trim()) {
+      const snippet = e.text.trim().replace(/\s+/g, " ").slice(0, 160);
+      if (!base.includes(snippet)) detail.push(`body: ${snippet}`);
+    }
+    if (detail.length > 0) return `${base} (${sanitizeTerminalText(detail.join("; "))})`;
+  }
+  return base;
 }
 
 function formatPaths(paths: string[]): string {
