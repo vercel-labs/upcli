@@ -250,19 +250,13 @@ async function resolveEnvFile(
 
   if (!interactive()) {
     await ui.info(
-      pc.dim(
-        `${pc.bold(candidate)} found. Pass ${pc.cyan(`--env-file ${candidate}`)} to inject it.`,
-      ),
+      pc.dim(`${pc.bold(candidate)} found. Pass ${pc.cyan(`--env-file ${candidate}`)} to use it.`),
     );
     return undefined;
   }
 
-  await ui.note(
-    `${pc.bold(candidate)} stays local; it is injected only into this dev server.`,
-    "Local env file found",
-  );
   const accepted = await p.confirm({
-    message: `Inject ${candidate} into the remote dev server now and on future runs?`,
+    message: `Use ${candidate} for this dev server? Injected as env vars, never uploaded.`,
     initialValue: false,
   });
   if (p.isCancel(accepted)) {
@@ -319,14 +313,16 @@ async function runDev(
   try {
     auth = await resolveAuth(dir);
   } catch (err) {
+    if (isAuthError(err)) {
+      await authSpin.stop("Not signed in");
+      await signInAndExit(ui);
+    }
     await authSpin.fail("Authentication failed");
     return fail(err);
   }
   if (auth.kind === "anonymous") {
-    await authSpin.stop("Not logged in");
-    await ui.note(`Run ${pc.cyan("vercel login")} and try again.`, "Authentication required");
-    await ui.outro(pc.dim("Aborted."));
-    process.exit(1);
+    await authSpin.stop("Not signed in");
+    await signInAndExit(ui);
   }
   await authSpin.stop("Authenticated");
 
@@ -410,12 +406,12 @@ async function runDev(
       result.skippedLarge,
       `Skipped local file larger than ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB`,
     );
-    await reportSkipped("symlink", result.skippedSymlinks, "Skipped local symlink");
+    await reportSkipped("symlink", result.skippedSymlinks, "Skipped local symlink", "info");
   };
   if (envFile) {
-    await ui.info(`Using ${pc.bold(envFile.rel)}; injected only, never uploaded or persisted.`);
+    await ui.info(`Using ${pc.bold(envFile.rel)} for this dev server.`);
   } else if (skippedEnv) {
-    await ui.info(`Local env files stay local. Use ${pc.bold("--env-file")} to inject one.`);
+    await ui.info(`Pass ${pc.bold("--env-file")} to use a local env file.`);
   }
   if (includeSensitiveConfig) {
     await ui.info(`Sensitive config enabled; matching files may persist.`);
@@ -454,6 +450,10 @@ async function runDev(
       onResume: () => settleLifecycle(true),
     });
   } catch (err) {
+    if (isAuthError(err)) {
+      await bootSpin.stop("Not signed in");
+      await signInAndExit(ui);
+    }
     await bootSpin.fail("Could not start sandbox");
     return fail(err);
   }
@@ -1098,6 +1098,22 @@ function formatError(err: unknown): string {
     if (detail.length > 0) return `${base} (${sanitizeTerminalText(detail.join("; "))})`;
   }
   return base;
+}
+
+/** True when an error is an authentication/authorization failure (bad or expired token). */
+function isAuthError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const status = (err as { response?: { status?: number } }).response?.status;
+  if (status === 401 || status === 403) return true;
+  const message = err instanceof Error ? err.message : "";
+  return /\b40[13]\b|forbidden|not authorized|unauthorized|invalidtoken/i.test(message);
+}
+
+/** Calm sign-in nudge for any credential issue: no scary failure or raw 403 dump. */
+async function signInAndExit(ui: TerminalFlow): Promise<never> {
+  await ui.note(`Run ${pc.cyan("vercel login")}, then try again.`, "Sign in to continue");
+  await ui.outro(pc.dim("Aborted."));
+  process.exit(1);
 }
 
 function formatPaths(paths: string[]): string {
