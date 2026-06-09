@@ -15,8 +15,15 @@ export async function waitForPort(
   signal?: AbortSignal,
 ): Promise<boolean> {
   const iterations = Math.ceil(timeoutMs / 100);
-  const script = `for i in $(seq 1 ${iterations}); do (echo > /dev/tcp/127.0.0.1/${port}) 2>/dev/null && exit 0; sleep 0.1; done; exit 1`;
-  const { exitCode } = await sandbox.exec("bash", ["-c", script], { signal, retryTransport: true });
+  // Pass the loop count and port as positional arguments ($1/$2) rather than
+  // interpolating them into the script, matching the rest of the codebase.
+  const script =
+    'for i in $(seq 1 "$1"); do (echo > "/dev/tcp/127.0.0.1/$2") 2>/dev/null && exit 0; sleep 0.1; done; exit 1';
+  const { exitCode } = await sandbox.exec(
+    "bash",
+    ["-c", script, "waitForPort", String(iterations), String(port)],
+    { signal, retryTransport: true },
+  );
   return exitCode === 0;
 }
 

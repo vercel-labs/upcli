@@ -445,6 +445,6 @@ describe("manifest diffing", () => {
 
     await removeFiles(sandbox, ["src/removed.ts"]);
 
-    expect(commands).toEqual([["-f", "/vercel/sandbox/src/removed.ts"]]);
+    expect(commands).toEqual([["-f", "--", "/vercel/sandbox/src/removed.ts"]]);
   });
 });

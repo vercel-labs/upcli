@@ -1,6 +1,7 @@
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, test, vi } from "vitest";
 import {
+  isOpenableUrl,
   SPINNER_FRAMES,
   SPINNER_INTERVAL_MS,
   sanitizeTerminalText,
@@ -199,5 +200,30 @@ describe("TerminalFlow", () => {
     await note;
     expect(complete).toBe(true);
     expect(capture.read()).toContain(url);
+  });
+});
+
+describe("isOpenableUrl", () => {
+  test("accepts a public sandbox URL", () => {
+    expect(isOpenableUrl("https://my-app-3000.vercel.run")).toBe(true);
+  });
+
+  test("rejects non-https and non-vercel.run origins", () => {
+    expect(isOpenableUrl("http://my-app-3000.vercel.run")).toBe(false);
+    expect(isOpenableUrl("https://example.com")).toBe(false);
+    expect(isOpenableUrl("file:///etc/passwd")).toBe(false);
+  });
+
+  test("rejects a lookalike host that does not end in .vercel.run", () => {
+    expect(isOpenableUrl("https://evil-vercel.run")).toBe(false);
+    expect(isOpenableUrl("https://vercel.run.evil.com")).toBe(false);
+  });
+
+  test("rejects shell metacharacters", () => {
+    expect(isOpenableUrl("https://x.vercel.run;calc")).toBe(false);
+    expect(isOpenableUrl("https://x.vercel.run&calc")).toBe(false);
+    expect(isOpenableUrl("https://x.vercel.run`id`")).toBe(false);
+    expect(isOpenableUrl("https://x.vercel.run a")).toBe(false);
+    expect(isOpenableUrl("not a url")).toBe(false);
   });
 });
