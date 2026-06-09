@@ -353,8 +353,26 @@ export class TerminalSpinner {
   }
 }
 
+/**
+ * Public sandbox URLs are `https://<subdomain>.vercel.run` with no path or
+ * query. Opening goes through a shell on Windows (`start` is a cmd builtin), so
+ * only hand it a URL confirmed to be one of those: a strict character set with
+ * no shell metacharacters, plus an https `*.vercel.run` origin. This keeps a
+ * command-injection vector closed should the URL's source ever change.
+ */
+export function isOpenableUrl(url: string): boolean {
+  if (!/^[A-Za-z0-9:/._-]+$/.test(url)) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname.endsWith(".vercel.run");
+  } catch {
+    return false;
+  }
+}
+
 /** Open a URL in the user's default browser, cross-platform. Best-effort. */
 export function openUrl(url: string): void {
+  if (!isOpenableUrl(url)) return;
   const cmd =
     process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
   try {
