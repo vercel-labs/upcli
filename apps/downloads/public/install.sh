@@ -6,7 +6,7 @@ set -eu
 # No-op on POSIX sh/dash, active on bash/zsh.
 (set -o pipefail) 2>/dev/null && set -o pipefail || true
 
-VERSION="${UP_VERSION:-v0.1.0-beta.4}"
+VERSION="${UP_VERSION:-v0.1.0-beta.5}"
 INSTALL_DIR="${UP_INSTALL_DIR:-${HOME:?HOME is required}/.local/bin}"
 DOWNLOAD_ROOT="${UP_DOWNLOAD_ROOT:-https://cdn.upcli.dev/releases/${VERSION}}"
 
