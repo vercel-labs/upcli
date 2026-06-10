@@ -202,7 +202,7 @@ async function confirmSharedCommands(
   await ui.note(
     `${pc.bold("Install:")} ${displayCommand(profile.installCommand)}\n` +
       `${pc.bold("Dev:")} ${displayCommand(profile.devCommand)}` +
-      (hasEnvFile ? `\n! Local env values are injected for this run.` : "") +
+      (hasEnvFile ? `\nLocal env values are injected for this run.` : "") +
       (includeSensitiveConfig ? `\n! Sensitive config may persist in this sandbox.` : ""),
     "Review up.config.json commands",
   );
@@ -232,13 +232,17 @@ async function resolveEnvFile(
   explicit?: string,
 ): Promise<EnvFile | undefined> {
   if (explicit) {
-    return await readEnvFile(dir, explicit).catch((err) => {
+    const file = await readEnvFile(dir, explicit).catch((err) => {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
         p.log.error(`Env file not found: ${pc.bold(sanitizeTerminalText(explicit))}`);
         process.exit(1);
       }
       return fail(err);
     });
+    // The flag sticks: opting in once should not require remembering the
+    // flag on every later run (it also overrides an earlier "no").
+    await rememberEnvFilePreference(dir, file.rel);
+    return file;
   }
 
   const preference = await readEnvFilePreference(dir);
@@ -257,7 +261,9 @@ async function resolveEnvFile(
 
   const accepted = await p.confirm({
     message: `Use ${candidate} for this dev server? Injected as env vars, never uploaded.`,
-    initialValue: false,
+    // An app with a local dotenv almost always needs it to run; default to
+    // injecting so the common path is one Enter and the app just works.
+    initialValue: true,
   });
   if (p.isCancel(accepted)) {
     await ui.outro(pc.dim("Configuration cancelled."));
@@ -410,7 +416,9 @@ async function runDev(
   };
   if (envFile) {
     await ui.info(`Using ${pc.bold(envFile.rel)} for this dev server.`);
-  } else if (skippedEnv) {
+  } else if (skippedEnv && (await readEnvFilePreference(dir)) === undefined) {
+    // Hint only while no decision exists; a recorded "no" stays quiet
+    // instead of nagging on every run.
     await ui.info(`Pass ${pc.bold("--env-file")} to use a local env file.`);
   }
   if (includeSensitiveConfig) {
