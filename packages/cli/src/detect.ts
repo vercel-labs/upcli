@@ -222,8 +222,12 @@ export async function detectPackageManager(
 }
 
 async function readPackageJson(dir: string): Promise<PackageJson | null> {
+  const file = path.join(dir, "package.json");
   try {
-    return JSON.parse(await readFile(path.join(dir, "package.json"), "utf8"));
+    // Bounded like every detection read: an oversized package.json is treated
+    // as absent rather than buffered into memory before the trust prompt.
+    if ((await stat(file)).size > MAX_DETECT_FILE_BYTES) return null;
+    return JSON.parse(await readFile(file, "utf8"));
   } catch {
     return null;
   }
@@ -319,13 +323,40 @@ async function nodeProfile(
 }
 
 /**
+ * Cap how much any single file read buffers during detection. A cloned repo is
+ * untrusted and scanned (package.json, index.js, server.ts, Cargo.toml, ...)
+ * before any trust prompt, so an oversized file must not be read whole into
+ * memory. 4 MB is far above any real detection input and far below OOM.
+ */
+export const MAX_DETECT_FILE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * A filesystem detector that treats an oversized file as empty (its detectors
+ * simply do not match) instead of buffering it whole. Mirrors the parent's
+ * path resolution because that is private; detection never `_chdir`s, so only
+ * the root reader needs bounding.
+ */
+class BoundedFileSystemDetector extends LocalFileSystemDetector {
+  constructor(private readonly boundRoot: string) {
+    super(boundRoot);
+  }
+
+  async _readFile(name: string): Promise<Buffer> {
+    const rel = name.startsWith(this.boundRoot) ? path.relative(this.boundRoot, name) : name;
+    const file = path.join(this.boundRoot, rel);
+    const { size } = await stat(file);
+    return size > MAX_DETECT_FILE_BYTES ? Buffer.alloc(0) : readFile(file);
+  }
+}
+
+/**
  * Detect a conservative automatic launch profile. Node projects with an
  * existing `scripts.dev` or framework template are automatic. Python is only
  * automatic when serving static files or an obvious Django `manage.py`;
  * FastAPI, Flask and arbitrary entrypoints need a saved/entered command.
  */
 export async function detect(dir: string): Promise<Detected> {
-  const fs = new LocalFileSystemDetector(dir);
+  const fs = new BoundedFileSystemDetector(dir);
   const record = await detectFrameworkRecord({
     fs,
     frameworkList: frameworks as unknown as readonly Framework[],

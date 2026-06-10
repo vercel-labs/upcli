@@ -7,6 +7,13 @@ export interface EnvFile {
   values: Record<string, string>;
 }
 
+/**
+ * Cap the dotenv read. A cloned repo can ship an `.env.local`, and the prompt
+ * to inject it defaults to yes, so a hostile oversized file must not be read
+ * whole into memory. No real dotenv approaches this; reject rather than buffer.
+ */
+const MAX_ENV_FILE_BYTES = 4 * 1024 * 1024;
+
 function validateRelativeEnvPath(input: string): string {
   const normalized = path.normalize(input);
   if (
@@ -29,6 +36,9 @@ async function readRegularFileNoFollow(abs: string): Promise<string> {
     const current = await handle.stat();
     if (!current.isFile()) {
       throw new Error(`Env file is not a regular file: ${JSON.stringify(abs)}.`);
+    }
+    if (current.size > MAX_ENV_FILE_BYTES) {
+      throw new Error(`Env file is too large (limit ${MAX_ENV_FILE_BYTES} bytes): ${abs}.`);
     }
     return await handle.readFile("utf8");
   } finally {
