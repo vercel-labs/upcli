@@ -258,6 +258,28 @@ function installCommandText(pm: PackageManager, hasLockfile: boolean): string {
   return [install.cmd, ...install.args].join(" ");
 }
 
+/**
+ * The port a dev script binds explicitly, so the supervisor waits on the port
+ * the server actually uses instead of the framework default. Recognizes the
+ * common forms `--port 4000`, `--port=4000`, `-p 4000` (Next.js, Storybook)
+ * and a leading `PORT=4000` env assignment. Without this, a hardcoded port
+ * silently mismatches the default and boot times out.
+ */
+export function portFromDevScript(script: string): number | undefined {
+  const patterns = [
+    /(?<![\w-])--port[=\s]+(\d{1,5})(?![\d.])/,
+    /(?<![\w-])-p[=\s]+(\d{1,5})(?![\d.])/,
+    /(?:^|\s)PORT=(\d{1,5})(?![\d.])/,
+  ];
+  for (const re of patterns) {
+    const match = re.exec(script);
+    if (!match?.[1]) continue;
+    const port = Number(match[1]);
+    if (Number.isInteger(port) && port >= 1 && port <= 65535) return port;
+  }
+  return undefined;
+}
+
 function scriptCommand(pm: PackageManager): string {
   // PORT is always injected as an env var at spawn time; modern frameworks
   // (Next.js, Vite, SvelteKit, Nuxt, …) read it automatically. Passing
@@ -274,9 +296,10 @@ async function nodeProfile(
   name: string,
   devCommand: string,
   dependencyFiles: string[],
+  portOverride?: number,
 ): Promise<Detected> {
   const install = installCommandText(packageManager, await hasLockfileFor(dir, packageManager));
-  const suggestedPort = portFor(slug);
+  const suggestedPort = portOverride ?? portFor(slug);
   return {
     slug,
     name,
@@ -317,6 +340,8 @@ export async function detect(dir: string): Promise<Detected> {
   if (pkg?.scripts?.dev) {
     const dependencyFiles = await nodeDependencyFiles(dir, pkg);
     const nodeSlug = detectedPython ? null : slug;
+    const scriptPort =
+      typeof pkg.scripts.dev === "string" ? portFromDevScript(pkg.scripts.dev) : undefined;
     return nodeProfile(
       dir,
       packageManager,
@@ -325,6 +350,7 @@ export async function detect(dir: string): Promise<Detected> {
       detectedPython ? "Node.js" : (record?.name ?? "Node.js"),
       scriptCommand(packageManager),
       dependencyFiles,
+      scriptPort,
     );
   }
 

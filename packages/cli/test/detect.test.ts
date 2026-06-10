@@ -10,6 +10,7 @@ import {
   detectPackageManager,
   installCommand,
   portFlagForSlug,
+  portFromDevScript,
   shellInvocation,
 } from "../src/detect.js";
 
@@ -143,6 +144,21 @@ describe("automatic profiles", () => {
     expect(d.profile?.dependencyFiles).toContain("pnpm-workspace.yaml");
   });
 
+  it.each([
+    ["next dev -p 4000", 4000],
+    ["next dev --port 4100", 4100],
+    ["next dev --port=4200", 4200],
+    ["PORT=4300 node server.js", 4300],
+  ])("honors a hardcoded port in the dev script: %s", async (script, port) => {
+    await write(
+      "package.json",
+      JSON.stringify({ dependencies: { next: "15.0.0" }, scripts: { dev: script } }),
+    );
+    const d = await detect(dir);
+    expect(d.profile?.port).toBe(port);
+    expect(d.suggestedPort).toBe(port);
+  });
+
   it("passes a reliable port variable to Vite scripts", async () => {
     await write(
       "package.json",
@@ -232,6 +248,32 @@ describe("commands", () => {
       cmd: "bun",
       args: ["install", "--frozen-lockfile"],
     });
+  });
+});
+
+describe("portFromDevScript", () => {
+  it("reads explicit ports from common dev-script forms", () => {
+    expect(portFromDevScript("next dev -p 4000")).toBe(4000);
+    expect(portFromDevScript("next dev --port 8080")).toBe(8080);
+    expect(portFromDevScript("vite --port=5000")).toBe(5000);
+    expect(portFromDevScript("storybook dev -p 6006")).toBe(6006);
+    expect(portFromDevScript("PORT=4000 node server.js")).toBe(4000);
+    expect(portFromDevScript("cross-env PORT=4000 remix dev")).toBe(4000);
+  });
+
+  it("returns undefined when no explicit port is present", () => {
+    expect(portFromDevScript("next dev")).toBeUndefined();
+    expect(portFromDevScript("vite")).toBeUndefined();
+    expect(portFromDevScript("node server.js")).toBeUndefined();
+  });
+
+  it("does not misread similar flags or out-of-range values as a port", () => {
+    // `--prefix`/`-prod` contain "-p" but are not the port flag.
+    expect(portFromDevScript("eleventy --prefix 5 --serve")).toBeUndefined();
+    expect(portFromDevScript("tool -prod")).toBeUndefined();
+    // Reject non-port numbers so a stray flag never overrides the default.
+    expect(portFromDevScript("next dev --port 99999")).toBeUndefined();
+    expect(portFromDevScript("next dev --port 0")).toBeUndefined();
   });
 });
 
