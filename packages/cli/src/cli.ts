@@ -863,7 +863,10 @@ async function runDev(
         await stopDevProcess(devProc);
         await spin.fail("Dev server did not become ready");
         process.stdout.write(sanitizeTerminalText(recent.text(), { preserveNewlines: true }));
-        throw new Error("Timed out waiting for the dev server. See logs above.");
+        throw new Error(
+          `Timed out waiting for the dev server on port ${devPort}. ` +
+            "If your app listens on a different port, re-run with --port. See logs above.",
+        );
       }
       return devProc;
     };
@@ -1022,6 +1025,23 @@ async function runStop(input: string) {
   try {
     await s.stop(`Snapshot saved ${pc.dim(await stopAndVerify(dir))}`);
   } catch (err) {
+    const notLoggedIn = err instanceof Error && err.message === "Not logged in.";
+    if (notLoggedIn || isAuthError(err)) {
+      await s.stop("Not signed in");
+      await signInAndExit(ui);
+    }
+    if (isNotFoundError(err)) {
+      await s.stop("No sandbox for this project");
+      await ui.info(
+        pc.dim(
+          "Nothing is running for this directory; it may have expired, or `up .` ran " +
+            `from a different directory. Check ${pc.cyan("up ls")}.`,
+        ),
+      );
+      await ui.outro(pc.dim("Nothing to stop."));
+      process.exitCode = 1;
+      return;
+    }
     await s.fail("Could not stop");
     return fail(err);
   }
@@ -1109,9 +1129,22 @@ function isAuthError(err: unknown): boolean {
   return /\b40[13]\b|forbidden|not authorized|unauthorized|invalidtoken/i.test(message);
 }
 
+/** True when the API says the sandbox (or its snapshot) no longer exists. */
+function isNotFoundError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const status = (err as { response?: { status?: number } }).response?.status;
+  if (status === 404 || status === 410) return true;
+  const message = err instanceof Error ? err.message : "";
+  return /\b404\b|not[_ ]?found/i.test(message);
+}
+
 /** Calm sign-in nudge for any credential issue: no scary failure or raw 403 dump. */
 async function signInAndExit(ui: TerminalFlow): Promise<never> {
-  await ui.note(`Run ${pc.cyan("vercel login")}, then try again.`, "Sign in to continue");
+  await ui.note(
+    `Run ${pc.cyan("vercel login")}, then try again.\n` +
+      pc.dim("No Vercel CLI? Install it with npm i -g vercel, or set VERCEL_TOKEN."),
+    "Sign in to continue",
+  );
   await ui.outro(pc.dim("Aborted."));
   process.exit(1);
 }
