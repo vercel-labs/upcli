@@ -159,6 +159,21 @@ describe("automatic profiles", () => {
     expect(d.suggestedPort).toBe(port);
   });
 
+  it("ignores an oversized package.json instead of parsing it", async () => {
+    // A hostile repo could bloat package.json; detection must not buffer it
+    // whole into memory before any trust prompt. An oversized file is treated
+    // as absent, so the would-be `next dev` auto-detection does not happen.
+    const pad = "x".repeat(4 * 1024 * 1024 + 100);
+    await write(
+      "package.json",
+      JSON.stringify({ scripts: { dev: "next dev" }, dependencies: { next: "15.0.0" }, _pad: pad }),
+    );
+    const d = await detect(dir);
+    expect(d.slug).toBeNull();
+    expect(d.profile).toBeNull();
+    expect(d.kind).toBe("custom");
+  });
+
   it("passes a reliable port variable to Vite scripts", async () => {
     await write(
       "package.json",

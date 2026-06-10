@@ -20,7 +20,7 @@ import {
   writeManifest,
 } from "./config.js";
 import { dependencyInputMatches } from "./dependency-files.js";
-import type { LaunchProfile } from "./detect.js";
+import { type LaunchProfile, MAX_DETECT_FILE_BYTES } from "./detect.js";
 import { type EnvFile, findDefaultEnvFile, readEnvFile } from "./env.js";
 import { type PromptDraft, resolveLaunchProfile } from "./launch-profile.js";
 import { SandboxLifecycle } from "./lifecycle.js";
@@ -93,7 +93,9 @@ async function remoteTextEquals(
 /** Count declared dependencies; used to pace the install segment on a cold run. */
 async function countDeps(dir: string): Promise<number> {
   try {
-    const pkg = JSON.parse(await readFile(path.join(dir, "package.json"), "utf8"));
+    const file = path.join(dir, "package.json");
+    if ((await stat(file)).size > MAX_DETECT_FILE_BYTES) return 0;
+    const pkg = JSON.parse(await readFile(file, "utf8"));
     return (
       Object.keys(pkg.dependencies ?? {}).length + Object.keys(pkg.devDependencies ?? {}).length
     );

@@ -12,6 +12,13 @@
 - The CLI runs on your machine with your privileges and reuses your existing Vercel login. Commands
   read from a checked-in `up.config.json` are displayed and must be confirmed before they run for
   the first time on a machine.
+- Running `up .` executes the project's own code in the sandbox: the detected install and dev
+  commands (e.g. `npm run dev`, which runs `package.json` scripts) run there, in **your** Vercel
+  account, with its resources and network access. The sandbox isolates that code from your machine,
+  not from your account — treat `up .` like `npm install && npm run dev` and run it only on
+  repositories you trust. Note the split: only the dev command receives an injected env file
+  (`--env-file`/`.env.local`); the install step does not, so dependency install hooks never see
+  those values.
 - Files named `.env*`, obvious key material (`*.pem`, `*.key`, `.ssh/**`, `id_rsa*`, ...) and
   credential config (`.npmrc`, `.netrc`, `.pypirc`, `.yarnrc*`, `.direnv`) are excluded from sync.
   Exclusion is by **filename**, not by scanning file contents.

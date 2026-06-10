@@ -103,6 +103,11 @@ describe("readEnvFile", () => {
     await expect(readEnvFile(dir, ".env.local")).rejects.toThrow();
   });
 
+  test("rejects an oversized env file instead of buffering it", async () => {
+    await writeFile(path.join(dir, ".env.local"), `BIG=${"x".repeat(4 * 1024 * 1024 + 100)}\n`);
+    await expect(readEnvFile(dir, ".env.local")).rejects.toThrow("too large");
+  });
+
   test("refuses a symlinked parent that escapes the project", async () => {
     if (process.platform === "win32") return;
     const outside = path.join(path.dirname(dir), `${path.basename(dir)}-outside`);
