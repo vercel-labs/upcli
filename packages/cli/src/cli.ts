@@ -1137,13 +1137,16 @@ function isAuthError(err: unknown): boolean {
   return /\b40[13]\b|forbidden|not authorized|unauthorized|invalidtoken/i.test(message);
 }
 
-/** True when the API says the sandbox (or its snapshot) no longer exists. */
+/**
+ * True when the API says the sandbox (or its snapshot) no longer exists.
+ * Status-only on purpose: matching "not found" in messages would also match
+ * DNS failures (ENOTFOUND) and report "nothing to stop" while the sandbox is
+ * actually still running. Unknown errors must surface, not soothe.
+ */
 function isNotFoundError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const status = (err as { response?: { status?: number } }).response?.status;
-  if (status === 404 || status === 410) return true;
-  const message = err instanceof Error ? err.message : "";
-  return /\b404\b|not[_ ]?found/i.test(message);
+  return status === 404 || status === 410;
 }
 
 /** Calm sign-in nudge for any credential issue: no scary failure or raw 403 dump. */
