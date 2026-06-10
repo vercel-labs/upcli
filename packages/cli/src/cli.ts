@@ -202,7 +202,7 @@ async function confirmSharedCommands(
   await ui.note(
     `${pc.bold("Install:")} ${displayCommand(profile.installCommand)}\n` +
       `${pc.bold("Dev:")} ${displayCommand(profile.devCommand)}` +
-      (hasEnvFile ? `\n! Local env values are injected for this run.` : "") +
+      (hasEnvFile ? `\nLocal env values are injected for this run.` : "") +
       (includeSensitiveConfig ? `\n! Sensitive config may persist in this sandbox.` : ""),
     "Review up.config.json commands",
   );
@@ -232,13 +232,17 @@ async function resolveEnvFile(
   explicit?: string,
 ): Promise<EnvFile | undefined> {
   if (explicit) {
-    return await readEnvFile(dir, explicit).catch((err) => {
+    const file = await readEnvFile(dir, explicit).catch((err) => {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
         p.log.error(`Env file not found: ${pc.bold(sanitizeTerminalText(explicit))}`);
         process.exit(1);
       }
       return fail(err);
     });
+    // The flag sticks: opting in once should not require remembering the
+    // flag on every later run (it also overrides an earlier "no").
+    await rememberEnvFilePreference(dir, file.rel);
+    return file;
   }
 
   const preference = await readEnvFilePreference(dir);
@@ -257,7 +261,9 @@ async function resolveEnvFile(
 
   const accepted = await p.confirm({
     message: `Use ${candidate} for this dev server? Injected as env vars, never uploaded.`,
-    initialValue: false,
+    // An app with a local dotenv almost always needs it to run; default to
+    // injecting so the common path is one Enter and the app just works.
+    initialValue: true,
   });
   if (p.isCancel(accepted)) {
     await ui.outro(pc.dim("Configuration cancelled."));
@@ -410,7 +416,9 @@ async function runDev(
   };
   if (envFile) {
     await ui.info(`Using ${pc.bold(envFile.rel)} for this dev server.`);
-  } else if (skippedEnv) {
+  } else if (skippedEnv && (await readEnvFilePreference(dir)) === undefined) {
+    // Hint only while no decision exists; a recorded "no" stays quiet
+    // instead of nagging on every run.
     await ui.info(`Pass ${pc.bold("--env-file")} to use a local env file.`);
   }
   if (includeSensitiveConfig) {
@@ -863,7 +871,10 @@ async function runDev(
         await stopDevProcess(devProc);
         await spin.fail("Dev server did not become ready");
         process.stdout.write(sanitizeTerminalText(recent.text(), { preserveNewlines: true }));
-        throw new Error("Timed out waiting for the dev server. See logs above.");
+        throw new Error(
+          `Timed out waiting for the dev server on port ${devPort}. ` +
+            "If your app listens on a different port, re-run with --port. See logs above.",
+        );
       }
       return devProc;
     };
@@ -1022,6 +1033,23 @@ async function runStop(input: string) {
   try {
     await s.stop(`Snapshot saved ${pc.dim(await stopAndVerify(dir))}`);
   } catch (err) {
+    const notLoggedIn = err instanceof Error && err.message === "Not logged in.";
+    if (notLoggedIn || isAuthError(err)) {
+      await s.stop("Not signed in");
+      await signInAndExit(ui);
+    }
+    if (isNotFoundError(err)) {
+      await s.stop("No sandbox for this project");
+      await ui.info(
+        pc.dim(
+          "Nothing is running for this directory; it may have expired, or `up .` ran " +
+            `from a different directory. Check ${pc.cyan("up ls")}.`,
+        ),
+      );
+      await ui.outro(pc.dim("Nothing to stop."));
+      process.exitCode = 1;
+      return;
+    }
     await s.fail("Could not stop");
     return fail(err);
   }
@@ -1109,9 +1137,25 @@ function isAuthError(err: unknown): boolean {
   return /\b40[13]\b|forbidden|not authorized|unauthorized|invalidtoken/i.test(message);
 }
 
+/**
+ * True when the API says the sandbox (or its snapshot) no longer exists.
+ * Status-only on purpose: matching "not found" in messages would also match
+ * DNS failures (ENOTFOUND) and report "nothing to stop" while the sandbox is
+ * actually still running. Unknown errors must surface, not soothe.
+ */
+function isNotFoundError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const status = (err as { response?: { status?: number } }).response?.status;
+  return status === 404 || status === 410;
+}
+
 /** Calm sign-in nudge for any credential issue: no scary failure or raw 403 dump. */
 async function signInAndExit(ui: TerminalFlow): Promise<never> {
-  await ui.note(`Run ${pc.cyan("vercel login")}, then try again.`, "Sign in to continue");
+  await ui.note(
+    `Run ${pc.cyan("vercel login")}, then try again.\n` +
+      pc.dim("No Vercel CLI? Install it with npm i -g vercel, or set VERCEL_TOKEN."),
+    "Sign in to continue",
+  );
   await ui.outro(pc.dim("Aborted."));
   process.exit(1);
 }
