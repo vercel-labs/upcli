@@ -1,20 +1,21 @@
-# @vercel-labs/up
+# up
 
 `up` is an experimental demo of persistent Vercel Sandboxes; we recommend trying it on experimental
 workloads, not production data. Run a local working directory in a persistent Vercel Sandbox and
-receive a public live development URL. Install the beta bundle from the public downloads deployment:
+receive a public live development URL:
 
 ```sh
-curl -fsSL https://cdn.upcli.dev/install.sh | sh
+npm install -g up
 cd ~/projects/my-app
 up .
 ```
 
-The installer requires Node.js `>=20.19.0`, verifies the downloadable JavaScript bundle checksum
-and places the `up` command in `~/.local/bin`. Installation needs no login. `up` reuses your
-existing Vercel CLI login (or a `VERCEL_TOKEN`); if the machine is not logged in, it tells you to
-run `vercel login` first. Run `up .` from a project directory; the CLI refuses the home directory
-and filesystem root.
+Requires Node.js `>=20.19.0`. Releases are published exclusively by CI from
+[vercel-labs/upcli](https://github.com/vercel-labs/upcli) using npm trusted publishing, so every
+version carries provenance. Installation needs no login. `up` reuses your existing Vercel CLI
+login (or a `VERCEL_TOKEN`); if the machine is not logged in, it tells you to run `vercel login`
+first. Run `up .` from a project directory; the CLI refuses the home directory and filesystem
+root.
 
 The `up` command supports Node projects automatically and supports Python or custom servers
 through `--command` or `up.config.json`. Projects declaring Bun, pnpm, Yarn, or a fixed npm

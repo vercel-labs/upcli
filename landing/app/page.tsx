@@ -1,6 +1,6 @@
 import { CopyButton } from "@/components/copy-button";
 
-const INSTALL = "curl -fsSL https://cdn.upcli.dev/install.sh | sh";
+const INSTALL = "npm i -g up";
 const CHANGELOG = "https://vercel.com/changelog/sandbox-persistence-is-now-ga";
 const DOCS = "https://vercel.com/docs/sandbox/concepts/persistent-sandboxes";
 const REPO = "https://github.com/vercel-labs/upcli";

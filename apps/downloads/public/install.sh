@@ -74,3 +74,5 @@ case ":${PATH:-}:" in
   *":$INSTALL_DIR:"*) printf 'Run: cd <your-project> && up .\n' ;;
   *) printf 'Add %s to PATH, then run: up .\n' "$INSTALL_DIR" ;;
 esac
+# This channel is frozen at its final beta. Releases moved to npm.
+printf 'Note: up is now distributed via npm: npm install -g up\n'

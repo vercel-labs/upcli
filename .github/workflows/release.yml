@@ -7,6 +7,10 @@ on:
 
 permissions:
   contents: write
+  # Required for npm trusted publishing (OIDC). The npm package `up` is
+  # configured on npmjs.com to accept publishes only from this repository's
+  # release.yml workflow; no npm token exists or is needed.
+  id-token: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -28,6 +32,8 @@ jobs:
         with:
           node-version: 24.x
           cache: pnpm
+          # Point npm at the public registry so trusted publishing targets it.
+          registry-url: https://registry.npmjs.org
 
       - name: Verify release version
         run: |
@@ -46,6 +52,25 @@ jobs:
           pnpm typecheck
           pnpm test
           pnpm build
+
+      - name: Publish to npm
+        working-directory: packages/cli
+        run: |
+          # Trusted publishing needs npm >= 11.5.1; runner images may lag.
+          npm install -g npm@^11
+          # Publish only when the tag is exactly v<package.json version>. A
+          # suffixed tag (e.g. v2.0.0-rc.1 while package.json says 2.0.0) must
+          # never publish 2.0.0. Prerelease versions go to the `beta` dist-tag
+          # so `npm install up` keeps resolving to the latest stable.
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "Tag $GITHUB_REF_NAME is not exactly v$version; skipping npm publish."
+            exit 0
+          fi
+          case "$version" in
+            *-*) npm publish --tag beta ;;
+            *) npm publish ;;
+          esac
 
       - name: Prepare release asset
         run: |
