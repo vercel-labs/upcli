@@ -1,6 +1,6 @@
 {
-  "name": "@vercel-labs/up",
-  "version": "0.1.0",
+  "name": "up",
+  "version": "2.0.0",
   "description": "Instant, shareable dev environments on Vercel Sandbox",
   "repository": {
     "type": "git",
@@ -18,10 +18,12 @@
   "bin": {
     "up": "./dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=20.19.0"
   },
-  "private": true,
   "scripts": {
     "build": "tsup && node scripts/check-bundle-size.mjs",
     "dev": "tsup --watch",

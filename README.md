@@ -4,7 +4,7 @@
 `*.vercel.run` URL. Edit locally and changes sync up; stop it and a later `up .` resumes from a
 snapshot. It is an experimental demo of
 [persistent Vercel Sandboxes](https://vercel.com/docs/sandbox/concepts/persistent-sandboxes),
-distributed only via `curl | sh` (not npm).
+distributed as the [`up`](https://www.npmjs.com/package/up) package on npm.
 
 > **Experimental.** Try `up` on experimental workloads, not production projects or real data. The
 > `*.vercel.run` URL is **public and unauthenticated**: anyone with the link can reach your dev
@@ -14,14 +14,17 @@ distributed only via `curl | sh` (not npm).
 ## Install
 
 ```sh
-curl -fsSL https://cdn.upcli.dev/install.sh | sh
+npm install -g up
 cd ~/projects/my-app
 up .
 ```
 
-Requires Node.js `>=20.19.0`. The installer verifies a SHA-256 checksum and drops `up` in
-`~/.local/bin`; installing needs no login. To run, `up` reuses your Vercel CLI login (or
-`VERCEL_TOKEN`) and must run inside a project, not your home directory.
+Requires Node.js `>=20.19.0`. Releases are published to npm exclusively by this repository's CI
+using [npm trusted publishing](https://docs.npmjs.com/trusted-publishers), so every version
+carries provenance; installing needs no login. To run, `up` reuses your Vercel CLI login (or
+`VERCEL_TOKEN`) and must run inside a project, not your home directory. (Versions up to
+`0.1.0-beta.5` were distributed via a `curl | sh` installer; those artifacts remain available
+but are frozen.)
 
 ## Usage
 
